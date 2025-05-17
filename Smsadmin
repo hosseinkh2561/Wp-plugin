@@ -1,1 +1,31 @@
 
+smsadmin/
+├── smsadmin.php
+├── includes/
+│   ├── settings.php
+│   ├── api.php
+│   ├── groups.php
+│   ├── send.php
+│   ├── reports.php
+│   ├── support.php
+│   ├── error.php
+│   ├── config.php
+│   ├── logs.php
+├── assets/
+│   ├── css/
+│   │   ├── style.css
+│   ├── js/
+│   │   ├── script.js
+├── logs/
+│   ├── api_errors/
+│   │   ├── error_log_*.txt
+├── templates/
+│   ├── sms_template_1.txt
+│   ├── sms_template_2.txt
+│   ├── sms_template_3.txt
+│   ├── sms_template_4.txt
+│   ├── sms_template_5.txt
+├── languages/
+│   ├── smsadmin-fa_IR.po
+│   ├── smsadmin-fa_IR.mo
+├── readme.txt
