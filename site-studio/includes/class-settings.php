@@ -12,13 +12,22 @@ if (! defined('ABSPATH')) {
 }
 
 final class Settings {
-    const OPTION = 'arena_site_studio_options';
-    const GROUP  = 'arena_site_studio_group';
+    const OPTION        = 'arena_site_studio_options';
+    const GROUP         = 'arena_site_studio_group';
+    const SCHEMA_VERSION = 1;
+
+    /** @var array|null */
+    private static $cache;
+
+    /** @var array|null */
+    private static $defaults_cache;
 
     /**
-     * Register the setting with WordPress.
+     * Register the setting with WordPress and migrate an older option once.
      */
     public function register() {
+        self::upgrade_stored_option();
+
         register_setting(
             self::GROUP,
             self::OPTION,
@@ -31,19 +40,30 @@ final class Settings {
     }
 
     /**
+     * Clear the request cache after an AJAX or admin update.
+     */
+    public static function clear_cache() {
+        self::$cache = null;
+    }
+
+    /**
      * Return the complete option object. Defaults are merged so an upgrade
-     * never makes a newly added field undefined.
+     * never makes a newly added field undefined. Caching prevents repeated
+     * calls from performing another options-table lookup during one request.
      *
      * @return array
      */
     public static function get() {
-        $saved = get_option(self::OPTION, array());
-
-        if (! is_array($saved)) {
-            $saved = array();
+        if (null !== self::$cache) {
+            return self::$cache;
         }
 
-        return array_replace_recursive(self::defaults(), $saved);
+        $saved = get_option(self::OPTION, array());
+        $saved = is_array($saved) ? self::migrate($saved) : array();
+
+        self::$cache = self::merge_with_defaults($saved);
+        self::$cache['schema_version'] = self::SCHEMA_VERSION;
+        return self::$cache;
     }
 
     /**
@@ -53,7 +73,11 @@ final class Settings {
      * @return array
      */
     public static function defaults() {
-        return array(
+        if (null !== self::$defaults_cache) {
+            return self::$defaults_cache;
+        }
+
+        self::$defaults_cache = array(
             'enabled'       => false,
             'preset'        => 'commerce',
             'homepage_mode' => 'canvas',
@@ -172,7 +196,10 @@ final class Settings {
                 'woo_notice_dismissed'    => false,
             ),
             'custom_css'    => '',
+            'schema_version' => self::SCHEMA_VERSION,
         );
+
+        return self::$defaults_cache;
     }
 
     /**
@@ -184,112 +211,120 @@ final class Settings {
      */
     public static function sanitize($input) {
         $defaults = self::defaults();
-        $input    = is_array($input) ? wp_unslash($input) : array();
-        $out      = $defaults;
+        $saved    = get_option(self::OPTION, array());
+        $saved    = is_array($saved) ? self::migrate($saved) : array();
+        $base  = self::merge_with_defaults($saved);
+        $input = is_array($input) ? wp_unslash($input) : array();
+        $out   = $defaults;
 
-        $out['enabled']       = ! empty($input['enabled']);
-        $out['preset']        = self::choice($input, 'preset', array('commerce', 'editorial', 'minimal', 'marketplace'), $defaults['preset']);
-        $out['homepage_mode'] = self::choice($input, 'homepage_mode', array('canvas', 'content', 'disabled'), $defaults['homepage_mode']);
-        $out['brand_name']    = self::text($input, 'brand_name', $defaults['brand_name'], 120);
-        $out['tagline']       = self::text($input, 'tagline', $defaults['tagline'], 180);
-        $out['logo_id']       = self::id($input, 'logo_id');
-        $out['menu_id']       = self::id($input, 'menu_id');
+        $out['enabled']       = self::flag($input, 'enabled', ! empty($base['enabled']));
+        $out['preset']        = self::choice($input, 'preset', array('commerce', 'editorial', 'minimal', 'marketplace'), $base['preset']);
+        $out['homepage_mode'] = self::choice($input, 'homepage_mode', array('canvas', 'content', 'disabled'), $base['homepage_mode']);
+        $out['brand_name']    = self::text($input, 'brand_name', $base['brand_name'], 120);
+        $out['tagline']       = self::text($input, 'tagline', $base['tagline'], 180);
+        $out['logo_id']       = self::id($input, 'logo_id', $base['logo_id']);
+        $out['menu_id']       = self::id($input, 'menu_id', $base['menu_id']);
 
         $header = isset($input['header']) && is_array($input['header']) ? $input['header'] : array();
-        $out['header']['announcement_enabled'] = ! empty($header['announcement_enabled']);
-        $out['header']['announcement']         = self::text($header, 'announcement', $defaults['header']['announcement'], 180);
-        $out['header']['sticky']               = ! empty($header['sticky']);
-        $out['header']['show_search']          = ! empty($header['show_search']);
-        $out['header']['show_cart']            = ! empty($header['show_cart']);
-        $out['header']['show_account']         = ! empty($header['show_account']);
-        $out['header']['cta_enabled']          = ! empty($header['cta_enabled']);
-        $out['header']['cta_text']             = self::text($header, 'cta_text', $defaults['header']['cta_text'], 80);
-        $out['header']['cta_url']              = self::url($header, 'cta_url');
+        $out['header']['announcement_enabled'] = self::flag($header, 'announcement_enabled', ! empty($base['header']['announcement_enabled']));
+        $out['header']['announcement']         = self::text($header, 'announcement', $base['header']['announcement'], 180);
+        $out['header']['sticky']               = self::flag($header, 'sticky', ! empty($base['header']['sticky']));
+        $out['header']['show_search']          = self::flag($header, 'show_search', ! empty($base['header']['show_search']));
+        $out['header']['show_cart']            = self::flag($header, 'show_cart', ! empty($base['header']['show_cart']));
+        $out['header']['show_account']         = self::flag($header, 'show_account', ! empty($base['header']['show_account']));
+        $out['header']['cta_enabled']          = self::flag($header, 'cta_enabled', ! empty($base['header']['cta_enabled']));
+        $out['header']['cta_text']             = self::text($header, 'cta_text', $base['header']['cta_text'], 80);
+        $out['header']['cta_url']              = self::url($header, 'cta_url', $base['header']['cta_url']);
 
         $design = isset($input['design']) && is_array($input['design']) ? $input['design'] : array();
         foreach (array('primary', 'secondary', 'accent', 'background', 'surface', 'text', 'muted') as $color) {
-            $raw = isset($design[$color]) && is_scalar($design[$color]) ? (string) $design[$color] : '';
-            $value = sanitize_hex_color($raw);
-            $out['design'][$color] = $value ? $value : $defaults['design'][$color];
+            $raw       = isset($design[$color]) && is_scalar($design[$color]) ? (string) $design[$color] : '';
+            $value     = sanitize_hex_color($raw);
+            $base_color = isset($base['design'][$color]) && is_scalar($base['design'][$color]) ? sanitize_hex_color($base['design'][$color]) : false;
+            $out['design'][$color] = $value ? $value : ($base_color ? $base_color : $defaults['design'][$color]);
         }
-        $out['design']['container']    = self::number($design, 'container', 960, 1600, $defaults['design']['container']);
-        $out['design']['columns']      = self::number($design, 'columns', 2, 5, $defaults['design']['columns']);
-        $out['design']['radius']       = self::number($design, 'radius', 0, 48, $defaults['design']['radius']);
-        $out['design']['shadow']       = self::choice($design, 'shadow', array('none', 'soft', 'strong'), $defaults['design']['shadow']);
-        $out['design']['font']         = self::choice($design, 'font', array('system', 'modern', 'classic'), $defaults['design']['font']);
-        $out['design']['header_style'] = self::choice($design, 'header_style', array('floating', 'line', 'solid'), $defaults['design']['header_style']);
+        $out['design']['container']    = self::number($design, 'container', 960, 1600, $base['design']['container']);
+        $out['design']['columns']      = self::number($design, 'columns', 2, 5, $base['design']['columns']);
+        $out['design']['radius']       = self::number($design, 'radius', 0, 48, $base['design']['radius']);
+        $out['design']['shadow']       = self::choice($design, 'shadow', array('none', 'soft', 'strong'), $base['design']['shadow']);
+        $out['design']['font']         = self::choice($design, 'font', array('system', 'modern', 'classic'), $base['design']['font']);
+        $out['design']['header_style'] = self::choice($design, 'header_style', array('floating', 'line', 'solid'), $base['design']['header_style']);
 
         $hero = isset($input['hero']) && is_array($input['hero']) ? $input['hero'] : array();
-        $out['hero']['enabled']        = ! empty($hero['enabled']);
-        $out['hero']['eyebrow']        = self::text($hero, 'eyebrow', $defaults['hero']['eyebrow'], 120);
-        $out['hero']['title']          = self::textarea($hero, 'title', $defaults['hero']['title'], 220);
-        $out['hero']['description']    = self::textarea($hero, 'description', $defaults['hero']['description'], 500);
-        $out['hero']['button_text']    = self::text($hero, 'button_text', $defaults['hero']['button_text'], 80);
-        $out['hero']['button_url']     = self::url($hero, 'button_url');
-        $out['hero']['secondary_text'] = self::text($hero, 'secondary_text', $defaults['hero']['secondary_text'], 80);
-        $out['hero']['secondary_url']  = self::url($hero, 'secondary_url');
-        $out['hero']['image_id']       = self::id($hero, 'image_id');
-        $out['hero']['image_position'] = self::choice($hero, 'image_position', array('left', 'right'), $defaults['hero']['image_position']);
+        $out['hero']['enabled']        = self::flag($hero, 'enabled', ! empty($base['hero']['enabled']));
+        $out['hero']['eyebrow']        = self::text($hero, 'eyebrow', $base['hero']['eyebrow'], 120);
+        $out['hero']['title']          = self::textarea($hero, 'title', $base['hero']['title'], 220);
+        $out['hero']['description']    = self::textarea($hero, 'description', $base['hero']['description'], 500);
+        $out['hero']['button_text']    = self::text($hero, 'button_text', $base['hero']['button_text'], 80);
+        $out['hero']['button_url']     = self::url($hero, 'button_url', $base['hero']['button_url']);
+        $out['hero']['secondary_text'] = self::text($hero, 'secondary_text', $base['hero']['secondary_text'], 80);
+        $out['hero']['secondary_url']  = self::url($hero, 'secondary_url', $base['hero']['secondary_url']);
+        $out['hero']['image_id']       = self::id($hero, 'image_id', $base['hero']['image_id']);
+        $out['hero']['image_position'] = self::choice($hero, 'image_position', array('left', 'right'), $base['hero']['image_position']);
 
         $features = isset($input['features']) && is_array($input['features']) ? $input['features'] : array();
-        $out['features']['enabled'] = ! empty($features['enabled']);
-        $items = isset($features['items']) && is_array($features['items']) ? array_slice($features['items'], 0, 4) : array();
+        $out['features']['enabled'] = self::flag($features, 'enabled', ! empty($base['features']['enabled']));
+        $items = array_key_exists('items', $features) && is_array($features['items']) ? array_slice($features['items'], 0, 4) : $base['features']['items'];
         $out['features']['items'] = array();
-        foreach ($items as $item) {
+        foreach ($items as $index => $item) {
             if (! is_array($item)) {
                 continue;
             }
+            $feature_base = isset($base['features']['items'][$index]) ? $base['features']['items'][$index] : array('icon' => '✦', 'title' => '', 'description' => '');
             $out['features']['items'][] = array(
-                'icon'        => self::text($item, 'icon', '✦', 8),
-                'title'       => self::text($item, 'title', '', 80),
-                'description' => self::text($item, 'description', '', 180),
+                'icon'        => self::text($item, 'icon', $feature_base['icon'], 8),
+                'title'       => self::text($item, 'title', $feature_base['title'], 80),
+                'description' => self::text($item, 'description', $feature_base['description'], 180),
             );
         }
         if (empty($out['features']['items'])) {
-            $out['features']['items'] = $defaults['features']['items'];
+            $out['features']['items'] = $base['features']['items'];
         }
 
+        $products_input = isset($input['products']) && is_array($input['products']) ? $input['products'] : array();
         foreach (array('best_sellers', 'new_arrivals', 'on_sale') as $section) {
-            $value = isset($input['products'][$section]) && is_array($input['products'][$section]) ? $input['products'][$section] : array();
-            $out['products'][$section]['enabled']     = ! empty($value['enabled']);
-            $out['products'][$section]['title']       = self::text($value, 'title', $defaults['products'][$section]['title'], 100);
-            $out['products'][$section]['description'] = self::text($value, 'description', $defaults['products'][$section]['description'], 180);
-            $out['products'][$section]['limit']       = self::number($value, 'limit', 3, 24, $defaults['products'][$section]['limit']);
-            $out['products'][$section]['columns']     = self::number($value, 'columns', 2, 5, $defaults['products'][$section]['columns']);
-            $out['products'][$section]['autoplay']    = ! empty($value['autoplay']);
+            $value = isset($products_input[$section]) && is_array($products_input[$section]) ? $products_input[$section] : array();
+            $section_base = $base['products'][$section];
+            $out['products'][$section]['enabled']     = self::flag($value, 'enabled', ! empty($section_base['enabled']));
+            $out['products'][$section]['title']       = self::text($value, 'title', $section_base['title'], 100);
+            $out['products'][$section]['description'] = self::text($value, 'description', $section_base['description'], 180);
+            $out['products'][$section]['limit']       = self::number($value, 'limit', 3, 24, $section_base['limit']);
+            $out['products'][$section]['columns']     = self::number($value, 'columns', 2, 5, $section_base['columns']);
+            $out['products'][$section]['autoplay']    = self::flag($value, 'autoplay', ! empty($section_base['autoplay']));
         }
 
         $story = isset($input['story']) && is_array($input['story']) ? $input['story'] : array();
-        $out['story']['enabled']     = ! empty($story['enabled']);
-        $out['story']['eyebrow']     = self::text($story, 'eyebrow', $defaults['story']['eyebrow'], 100);
-        $out['story']['title']       = self::textarea($story, 'title', $defaults['story']['title'], 200);
-        $out['story']['description'] = self::textarea($story, 'description', $defaults['story']['description'], 500);
-        $out['story']['button_text'] = self::text($story, 'button_text', $defaults['story']['button_text'], 80);
-        $out['story']['button_url']  = self::url($story, 'button_url');
-        $out['story']['image_id']    = self::id($story, 'image_id');
-        $out['story']['image_side']  = self::choice($story, 'image_side', array('left', 'right'), $defaults['story']['image_side']);
+        $out['story']['enabled']     = self::flag($story, 'enabled', ! empty($base['story']['enabled']));
+        $out['story']['eyebrow']     = self::text($story, 'eyebrow', $base['story']['eyebrow'], 100);
+        $out['story']['title']       = self::textarea($story, 'title', $base['story']['title'], 200);
+        $out['story']['description'] = self::textarea($story, 'description', $base['story']['description'], 500);
+        $out['story']['button_text'] = self::text($story, 'button_text', $base['story']['button_text'], 80);
+        $out['story']['button_url']  = self::url($story, 'button_url', $base['story']['button_url']);
+        $out['story']['image_id']    = self::id($story, 'image_id', $base['story']['image_id']);
+        $out['story']['image_side']  = self::choice($story, 'image_side', array('left', 'right'), $base['story']['image_side']);
 
         $footer = isset($input['footer']) && is_array($input['footer']) ? $input['footer'] : array();
-        $out['footer']['enabled']     = ! empty($footer['enabled']);
-        $out['footer']['eyebrow']     = self::text($footer, 'eyebrow', $defaults['footer']['eyebrow'], 100);
-        $out['footer']['description'] = self::textarea($footer, 'description', $defaults['footer']['description'], 400);
-        $footer_email = isset($footer['email']) && is_scalar($footer['email']) ? (string) $footer['email'] : $defaults['footer']['email'];
+        $out['footer']['enabled']     = self::flag($footer, 'enabled', ! empty($base['footer']['enabled']));
+        $out['footer']['eyebrow']     = self::text($footer, 'eyebrow', $base['footer']['eyebrow'], 100);
+        $out['footer']['description'] = self::textarea($footer, 'description', $base['footer']['description'], 400);
+        $footer_email = isset($footer['email']) && is_scalar($footer['email']) ? (string) $footer['email'] : (is_scalar($base['footer']['email']) ? (string) $base['footer']['email'] : '');
         $out['footer']['email']       = sanitize_email($footer_email);
-        $out['footer']['phone']       = self::text($footer, 'phone', '', 60);
-        $out['footer']['address']     = self::text($footer, 'address', '', 180);
-        $out['footer']['image_id']    = self::id($footer, 'image_id');
-        $out['footer']['copyright']   = self::text($footer, 'copyright', $defaults['footer']['copyright'], 180);
-        $out['footer']['show_menu']   = ! empty($footer['show_menu']);
+        $out['footer']['phone']       = self::text($footer, 'phone', $base['footer']['phone'], 60);
+        $out['footer']['address']     = self::text($footer, 'address', $base['footer']['address'], 180);
+        $out['footer']['image_id']    = self::id($footer, 'image_id', $base['footer']['image_id']);
+        $out['footer']['copyright']   = self::text($footer, 'copyright', $base['footer']['copyright'], 180);
+        $out['footer']['show_menu']   = self::flag($footer, 'show_menu', ! empty($base['footer']['show_menu']));
 
         $integrations = isset($input['integrations']) && is_array($input['integrations']) ? $input['integrations'] : array();
-        $out['integrations']['use_elementor_widget']    = ! empty($integrations['use_elementor_widget']);
-        $out['integrations']['use_elementor_locations'] = ! empty($integrations['use_elementor_locations']);
-        $out['integrations']['woo_notice_dismissed']    = ! empty($integrations['woo_notice_dismissed']);
+        $out['integrations']['use_elementor_widget']    = self::flag($integrations, 'use_elementor_widget', ! empty($base['integrations']['use_elementor_widget']));
+        $out['integrations']['use_elementor_locations'] = self::flag($integrations, 'use_elementor_locations', ! empty($base['integrations']['use_elementor_locations']));
+        $out['integrations']['woo_notice_dismissed']    = self::flag($integrations, 'woo_notice_dismissed', ! empty($base['integrations']['woo_notice_dismissed']));
 
         // Admins may add small visual adjustments, but never close the style tag.
-        $custom_css = isset($input['custom_css']) && is_scalar($input['custom_css']) ? (string) $input['custom_css'] : '';
-        $custom_css = str_replace(array('</style', '<script', '</script', 'javascript:'), '', $custom_css);
+        $custom_css = isset($input['custom_css']) && is_scalar($input['custom_css']) ? (string) $input['custom_css'] : (is_scalar($base['custom_css']) ? (string) $base['custom_css'] : '');
+        $custom_css = preg_replace('/<\/?style|<script|<\/script|javascript\s*:/i', '', $custom_css);
         $out['custom_css'] = substr(wp_strip_all_tags($custom_css), 0, 8000);
+        $out['schema_version'] = self::SCHEMA_VERSION;
 
         return $out;
     }
@@ -443,32 +478,108 @@ final class Settings {
         return $fresh;
     }
 
+    private static function merge_with_defaults($saved) {
+        $defaults = self::defaults();
+        $base     = array_replace_recursive($defaults, is_array($saved) ? $saved : array());
+
+        foreach (array('header', 'design', 'hero', 'features', 'products', 'story', 'footer', 'integrations') as $section) {
+            if (! isset($base[$section]) || ! is_array($base[$section])) {
+                $base[$section] = $defaults[$section];
+            }
+        }
+        if (! isset($base['features']['items']) || ! is_array($base['features']['items'])) {
+            $base['features']['items'] = $defaults['features']['items'];
+        } else {
+            foreach ($base['features']['items'] as $index => $item) {
+                if (! is_array($item)) {
+                    $base['features']['items'][$index] = isset($defaults['features']['items'][$index]) ? $defaults['features']['items'][$index] : array('icon' => '✦', 'title' => '', 'description' => '');
+                }
+            }
+            if (empty($base['features']['items'])) {
+                $base['features']['items'] = $defaults['features']['items'];
+            }
+        }
+        foreach (array('best_sellers', 'new_arrivals', 'on_sale') as $section) {
+            if (! isset($base['products'][$section]) || ! is_array($base['products'][$section])) {
+                $base['products'][$section] = $defaults['products'][$section];
+            }
+        }
+
+        return $base;
+    }
+
+    /**
+     * Add newly introduced fields without destroying an existing design.
+     *
+     * @param array $saved Stored settings.
+     * @return array
+     */
+    private static function migrate($saved) {
+        $version = isset($saved['schema_version']) && is_scalar($saved['schema_version']) ? absint($saved['schema_version']) : 0;
+        if ($version < self::SCHEMA_VERSION) {
+            $saved['schema_version'] = self::SCHEMA_VERSION;
+        }
+        return $saved;
+    }
+
+    /**
+     * Persist the migration once during admin bootstrap. Front-end requests
+     * only merge defaults and never perform a write.
+     */
+    private static function upgrade_stored_option() {
+        $saved = get_option(self::OPTION, false);
+        if (! is_array($saved)) {
+            return;
+        }
+        $version = isset($saved['schema_version']) && is_scalar($saved['schema_version']) ? absint($saved['schema_version']) : 0;
+        if ($version >= self::SCHEMA_VERSION) {
+            return;
+        }
+
+        $migrated = array_replace_recursive(self::defaults(), self::migrate($saved));
+        update_option(self::OPTION, self::sanitize($migrated));
+        self::clear_cache();
+    }
+
+    private static function flag($array, $key, $fallback = false) {
+        return array_key_exists($key, $array) ? ! empty($array[$key]) : (bool) $fallback;
+    }
+
     private static function text($array, $key, $fallback = '', $length = 255) {
-        $raw   = isset($array[$key]) && is_scalar($array[$key]) ? (string) $array[$key] : $fallback;
-        $value = sanitize_text_field($raw);
+        $fallback = is_scalar($fallback) ? (string) $fallback : '';
+        $raw      = isset($array[$key]) && is_scalar($array[$key]) ? (string) $array[$key] : $fallback;
+        $value    = sanitize_text_field($raw);
         return function_exists('mb_substr') ? mb_substr($value, 0, $length) : substr($value, 0, $length);
     }
 
     private static function textarea($array, $key, $fallback = '', $length = 500) {
-        $raw   = isset($array[$key]) && is_scalar($array[$key]) ? (string) $array[$key] : $fallback;
-        $value = sanitize_textarea_field($raw);
+        $fallback = is_scalar($fallback) ? (string) $fallback : '';
+        $raw      = isset($array[$key]) && is_scalar($array[$key]) ? (string) $array[$key] : $fallback;
+        $value    = sanitize_textarea_field($raw);
         return function_exists('mb_substr') ? mb_substr($value, 0, $length) : substr($value, 0, $length);
     }
 
-    private static function url($array, $key) {
-        return isset($array[$key]) && is_scalar($array[$key]) ? esc_url_raw((string) $array[$key]) : '';
+    private static function url($array, $key, $fallback = '') {
+        $fallback = is_scalar($fallback) ? (string) $fallback : '';
+        return isset($array[$key]) && is_scalar($array[$key]) ? esc_url_raw((string) $array[$key]) : esc_url_raw($fallback);
     }
 
-    private static function id($array, $key) {
-        return isset($array[$key]) && is_scalar($array[$key]) ? absint($array[$key]) : 0;
+    private static function id($array, $key, $fallback = 0) {
+        $fallback = is_scalar($fallback) ? absint($fallback) : 0;
+        return isset($array[$key]) && is_scalar($array[$key]) ? absint($array[$key]) : $fallback;
     }
 
     private static function number($array, $key, $min, $max, $fallback) {
-        $value = isset($array[$key]) && is_scalar($array[$key]) ? absint($array[$key]) : absint($fallback);
+        $fallback = is_scalar($fallback) ? absint($fallback) : $min;
+        $value    = isset($array[$key]) && is_scalar($array[$key]) ? absint($array[$key]) : $fallback;
         return max($min, min($max, $value));
     }
 
     private static function choice($array, $key, $allowed, $fallback) {
+        $fallback = is_scalar($fallback) ? sanitize_key((string) $fallback) : '';
+        if (! in_array($fallback, $allowed, true)) {
+            $fallback = reset($allowed);
+        }
         $value = isset($array[$key]) && is_scalar($array[$key]) ? sanitize_key((string) $array[$key]) : $fallback;
         return in_array($value, $allowed, true) ? $value : $fallback;
     }

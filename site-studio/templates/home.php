@@ -28,12 +28,6 @@ if ($use_elementor_locations) {
 }
 $elementor_footer_html   = '';
 $elementor_footer_active = false;
-if ($use_elementor_locations) {
-    ob_start();
-    $elementor_footer_active = (bool) elementor_theme_do_location('footer');
-    $elementor_footer_html   = ob_get_clean();
-    $elementor_footer_active = $elementor_footer_active || (bool) trim($elementor_footer_html);
-}
 
 $cart_count = 0;
 if (function_exists('WC') && WC() && isset(WC()->cart) && WC()->cart) {
@@ -59,7 +53,7 @@ $cart_url    = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url
         <div class="studio-container studio-header-inner">
             <a class="studio-brand" href="<?php echo esc_url(home_url('/')); ?>" aria-label="<?php echo esc_attr($brand); ?>">
                 <?php if (! empty($settings['logo_id'])) : ?>
-                    <?php echo $this->image($settings['logo_id'], 'medium', 'studio-logo-image', $brand); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                    <?php echo $this->image($settings['logo_id'], 'medium', 'studio-logo-image', $brand, 'eager'); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                 <?php else : ?>
                     <span class="studio-brand-mark" aria-hidden="true"><span></span></span>
                     <span class="studio-brand-copy"><strong><?php echo esc_html($brand); ?></strong><small><?php echo esc_html($settings['tagline']); ?></small></span>
@@ -72,7 +66,7 @@ $cart_url    = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url
 
             <div class="studio-header-actions">
                 <?php if (! empty($header['show_search'])) : ?>
-                    <button type="button" class="studio-icon-button" data-studio-search-toggle aria-label="نمایش جستجو">⌕</button>
+                    <button type="button" class="studio-icon-button" data-studio-search-toggle aria-expanded="false" aria-controls="studio-search-panel" aria-label="نمایش جستجو">⌕</button>
                 <?php endif; ?>
                 <?php if (! empty($header['show_account'])) : ?>
                     <a class="studio-icon-button studio-account-link" href="<?php echo esc_url($account_url); ?>" aria-label="حساب کاربری">◎</a>
@@ -89,7 +83,7 @@ $cart_url    = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url
             </div>
         </div>
         <?php if (! empty($header['show_search'])) : ?>
-            <div class="studio-search-panel" data-studio-search-panel hidden>
+            <div class="studio-search-panel" id="studio-search-panel" data-studio-search-panel hidden>
                 <div class="studio-container">
                     <form role="search" method="get" action="<?php echo esc_url(home_url('/')); ?>">
                         <label for="studio-search-input">جستجو در سایت</label>
@@ -120,7 +114,7 @@ $cart_url    = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url
                     <div class="studio-hero-meta"><span class="studio-meta-avatar">✦</span><span><strong>تجربه‌ای متفاوت</strong><small>طراحی شده با توجه به شما</small></span></div>
                 </div>
                 <div class="studio-hero-visual" aria-label="تصویر معرفی">
-                    <?php echo $this->image($hero['image_id'], 'large', 'studio-hero-image', $hero['title']); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                    <?php echo $this->image($hero['image_id'], 'large', 'studio-hero-image', $hero['title'], 'eager'); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     <span class="studio-hero-sticker">برای شما<br><strong>انتخاب شده</strong></span>
                     <span class="studio-hero-orbit studio-hero-orbit-one"></span><span class="studio-hero-orbit studio-hero-orbit-two"></span>
                 </div>
@@ -157,6 +151,14 @@ $cart_url    = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url
         <?php endif; ?>
     </main>
 
+    <?php
+    if ($use_elementor_locations) {
+        ob_start();
+        $elementor_footer_active = (bool) elementor_theme_do_location('footer');
+        $elementor_footer_html   = ob_get_clean();
+        $elementor_footer_active = $elementor_footer_active || (bool) trim($elementor_footer_html);
+    }
+    ?>
     <?php if ($elementor_footer_active) : ?>
         <?php echo $elementor_footer_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
     <?php elseif (! empty($footer['enabled'])) : ?>

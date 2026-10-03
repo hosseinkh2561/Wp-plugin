@@ -146,9 +146,15 @@ final class Elementor {
             wp_send_json_error(array('message' => 'اطلاعات Elementor دریافت نشد: ' . $api->get_error_message()), 500);
         }
 
-        $skin    = new \Automatic_Upgrader_Skin();
+        if (empty($api->download_link) || ! is_string($api->download_link)) {
+            wp_send_json_error(array('message' => 'لینک دانلود معتبر برای Elementor دریافت نشد.'), 500);
+        }
+
+        $skin     = new \Automatic_Upgrader_Skin();
         $upgrader = new \Plugin_Upgrader($skin);
-        $result  = $upgrader->install($api->download_link);
+        ob_start();
+        $result = $upgrader->install(esc_url_raw($api->download_link));
+        ob_end_clean();
         if (is_wp_error($result) || ! $result) {
             $message = is_wp_error($result) ? $result->get_error_message() : 'نصب Elementor انجام نشد.';
             wp_send_json_error(array('message' => $message), 500);
@@ -170,6 +176,10 @@ final class Elementor {
         if (! function_exists('is_plugin_active')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
-        return is_plugin_active('elementor/elementor.php');
+        $active = is_plugin_active('elementor/elementor.php');
+        if (! $active && is_multisite() && function_exists('is_plugin_active_for_network')) {
+            $active = is_plugin_active_for_network('elementor/elementor.php');
+        }
+        return $active;
     }
 }

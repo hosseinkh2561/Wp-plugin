@@ -80,7 +80,8 @@ final class Renderer {
         }
 
         // Elementor's editor must keep control of its preview document.
-        if (defined('ELEMENTOR_VERSION') && isset($_GET['elementor-preview'])) {
+        $elementor_preview = isset($_GET['elementor-preview']) && is_scalar($_GET['elementor-preview']) ? sanitize_key(wp_unslash($_GET['elementor-preview'])) : '';
+        if (defined('ELEMENTOR_VERSION') && $elementor_preview) {
             return $template;
         }
 
@@ -146,8 +147,12 @@ final class Renderer {
         // while global homepage publishing is off.
         $this->enqueue_assets(true);
         $settings = $this->settings->get();
+        $late_style = did_action('wp_head') && ! wp_style_is('arena-site-studio', 'done');
 
         ob_start();
+        if ($late_style) {
+            echo '<style id="arena-site-studio-late-style">' . $this->dynamic_css() . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        }
         include ARENA_SITE_STUDIO_PATH . 'templates/home.php';
         return ob_get_clean();
     }
@@ -158,10 +163,11 @@ final class Renderer {
      * @param int    $id     Attachment ID.
      * @param string $size   Image size.
      * @param string $class  Extra class.
-     * @param string $alt    Alternative text.
+     * @param string $alt     Alternative text.
+     * @param string $loading Loading strategy.
      * @return string
      */
-    public function image($id, $size = 'large', $class = '', $alt = '') {
+    public function image($id, $size = 'large', $class = '', $alt = '', $loading = 'lazy') {
         $id = absint($id);
         if ($id && wp_attachment_is_image($id)) {
             $image = wp_get_attachment_image(
@@ -171,7 +177,7 @@ final class Renderer {
                 array(
                     'class'   => trim('studio-image ' . $class),
                     'alt'     => $alt ? $alt : get_post_meta($id, '_wp_attachment_image_alt', true),
-                    'loading' => 'lazy',
+                    'loading' => in_array($loading, array('lazy', 'eager'), true) ? $loading : 'lazy',
                 )
             );
             if ($image) {
@@ -214,6 +220,9 @@ final class Renderer {
         );
 
         $menu = wp_nav_menu($args);
+        if (is_wp_error($menu)) {
+            $menu = '';
+        }
         if ($menu) {
             return $menu;
         }
@@ -272,14 +281,16 @@ final class Renderer {
             $product_id = $product->get_id();
             $html .= '<article class="studio-product-card">';
             $html .= '<a class="studio-product-image" href="' . esc_url(get_permalink($product_id)) . '">';
-            $html .= $product->get_image('woocommerce_thumbnail', array('loading' => 'lazy'));
+            $product_image = $product->get_image('woocommerce_thumbnail', array('loading' => 'lazy'));
+            $html .= $product_image ? wp_kses_post($product_image) : '';
             if ($product->is_on_sale()) {
                 $html .= '<span class="studio-product-badge">پیشنهاد ویژه</span>';
             }
             $html .= '</a>';
             $html .= '<div class="studio-product-info">';
             $html .= '<h3><a href="' . esc_url(get_permalink($product_id)) . '">' . esc_html($product->get_name()) . '</a></h3>';
-            $html .= '<div class="studio-product-bottom"><span class="studio-product-price">' . wp_kses_post($product->get_price_html()) . '</span>';
+            $price_html = $product->get_price_html();
+            $html .= '<div class="studio-product-bottom"><span class="studio-product-price">' . ($price_html ? wp_kses_post($price_html) : '<span class="studio-product-no-price">تماس بگیرید</span>') . '</span>';
             if ($product->is_purchasable() && $product->is_in_stock()) {
                 $add_url = $product->is_type('simple') ? $product->add_to_cart_url() : get_permalink($product_id);
                 $html .= '<a class="studio-product-add" href="' . esc_url($add_url) . '" aria-label="' . esc_attr($product->is_type('simple') ? 'افزودن ' . $product->get_name() . ' به سبد' : 'مشاهده ' . $product->get_name()) . '">+</a>';
@@ -318,8 +329,9 @@ final class Renderer {
         );
 
         if ('best_sellers' === $key) {
-            $args['meta_key'] = 'total_sales';
-            $args['orderby']  = 'meta_value_num';
+            $args['meta_key']  = 'total_sales';
+            $args['meta_type'] = 'NUMERIC';
+            $args['orderby']   = 'meta_value_num';
             $args['order']    = 'DESC';
         } elseif ('new_arrivals' === $key) {
             $args['orderby'] = 'date';
@@ -329,7 +341,9 @@ final class Renderer {
             if (empty($sale_ids)) {
                 return array();
             }
-            $args['post__in'] = array_map('absint', $sale_ids);
+            // A large catalogue can return thousands of sale IDs. The rail
+            // never needs more than this bounded set for one request.
+            $args['post__in'] = array_slice(array_map('absint', $sale_ids), 0, 1000);
             $args['orderby']  = 'post__in';
         }
 
@@ -406,7 +420,7 @@ final class Renderer {
 
         $custom = trim((string) $options['custom_css']);
         if ($custom) {
-            $custom = str_replace(array('</style', '<script', '</script'), '', $custom);
+            $custom = preg_replace('/<\/?style|<script|<\/script|javascript\s*:/i', '', $custom);
             $css .= $custom;
         }
 

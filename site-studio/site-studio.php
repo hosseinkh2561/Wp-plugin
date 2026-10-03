@@ -3,7 +3,7 @@
  * Plugin Name:       استودیو پوسته سایت
  * Plugin URI:        https://example.com/site-studio
  * Description:       سازنده سبک و سریع صفحه اصلی فروشگاه؛ با هدر، فوتر، اسلایدر محصولات، رنگ‌ها، چیدمان‌های آماده و اتصال اختیاری به Elementor.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Author:            Site Studio
  * Author URI:        https://example.com
  * Text Domain:       arena-site-studio
@@ -17,7 +17,7 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
-define('ARENA_SITE_STUDIO_VERSION', '1.0.0');
+define('ARENA_SITE_STUDIO_VERSION', '1.0.1');
 define('ARENA_SITE_STUDIO_FILE', __FILE__);
 define('ARENA_SITE_STUDIO_PATH', plugin_dir_path(__FILE__));
 define('ARENA_SITE_STUDIO_URL', plugin_dir_url(__FILE__));

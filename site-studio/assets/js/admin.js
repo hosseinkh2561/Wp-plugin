@@ -11,6 +11,35 @@
     }
 
     $(function () {
+        var assistantToggle = $('[data-studio-assistant-toggle]');
+        var assistantPanel = $('[data-studio-assistant-panel]');
+        var closeAssistant = function () {
+            if (!assistantPanel.length) {
+                return;
+            }
+            assistantPanel.prop('hidden', true);
+            assistantToggle.attr('aria-expanded', 'false');
+        };
+        assistantToggle.on('click', function () {
+            var open = assistantToggle.attr('aria-expanded') === 'true';
+            assistantToggle.attr('aria-expanded', open ? 'false' : 'true');
+            assistantPanel.prop('hidden', open);
+        });
+        $(document).on('click', '[data-studio-assistant-close]', closeAssistant);
+        $(document).on('click', '[data-studio-assistant-link]', function (event) {
+            var target = $($(this).attr('href'));
+            if (target.length) {
+                event.preventDefault();
+                closeAssistant();
+                $('html, body').animate({ scrollTop: target.offset().top - 25 }, 260);
+            }
+        });
+        $(document).on('keydown', function (event) {
+            if ('Escape' === event.key) {
+                closeAssistant();
+            }
+        });
+
         $('[data-studio-media]').on('click', function (event) {
             event.preventDefault();
             var button = $(this);
@@ -46,6 +75,7 @@
                 return;
             }
             button.addClass('is-loading');
+            $('[data-studio-preset]').prop('disabled', true);
             feedback('در حال اعمال چیدمان…', false);
             $.post(ArenaSiteStudioAdmin.ajaxUrl, {
                 action: 'arena_site_studio_apply_preset',
@@ -62,6 +92,7 @@
                 feedback(ArenaSiteStudioAdmin.errorLabel, true);
             }).always(function () {
                 button.removeClass('is-loading');
+                $('[data-studio-preset]').prop('disabled', false);
             });
         });
 
@@ -110,7 +141,13 @@
         });
 
         $('.studio-settings-form').on('submit', function () {
-            $('#studio-submit').addClass('is-busy').text('در حال ذخیره…').prop('disabled', true);
+            var submit = $('#studio-submit');
+            submit.addClass('is-busy').prop('disabled', true);
+            if ('INPUT' === submit.prop('tagName')) {
+                submit.val('در حال ذخیره…');
+            } else {
+                submit.text('در حال ذخیره…');
+            }
         });
     });
 }(jQuery));

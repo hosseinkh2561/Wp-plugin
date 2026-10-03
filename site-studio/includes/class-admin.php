@@ -29,6 +29,7 @@ final class Admin {
         $this->renderer  = $renderer;
         $this->elementor = $elementor;
         add_action('wp_ajax_arena_site_studio_apply_preset', array($this, 'apply_preset'));
+        add_filter('admin_body_class', array($this, 'body_class'));
     }
 
     public function menu() {
@@ -38,7 +39,7 @@ final class Admin {
             'manage_options',
             'arena-site-studio',
             array($this, 'page'),
-            'dashicons-layout',
+            $this->menu_icon(),
             58
         );
     }
@@ -98,6 +99,20 @@ final class Admin {
     }
 
     /**
+     * Add a page-specific body hook without affecting the rest of wp-admin.
+     *
+     * @param string $classes Existing admin body classes.
+     * @return string
+     */
+    public function body_class($classes) {
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if ($screen && 'toplevel_page_arena-site-studio' === $screen->id) {
+            $classes .= ' arena-site-studio-admin-screen';
+        }
+        return $classes;
+    }
+
+    /**
      * Main settings screen.
      */
     public function page() {
@@ -107,10 +122,11 @@ final class Admin {
 
         $s          = $this->settings->get();
         $elementor  = $this->elementor->is_active();
-        $installed  = $this->elementor->is_installed();
+        $installed   = $this->elementor->is_installed();
         $woocommerce = defined('WC_VERSION') || class_exists('WooCommerce');
-        $menus      = wp_get_nav_menus();
-        $home_url   = home_url('/');
+        $menus       = wp_get_nav_menus();
+        $menus       = is_wp_error($menus) ? array() : $menus;
+        $home_url    = home_url('/');
         ?>
         <div class="wrap arena-studio-admin" dir="rtl">
             <div class="studio-admin-header">
@@ -124,6 +140,16 @@ final class Admin {
                     <a class="button button-primary" href="#studio-save">ذخیره تغییرات</a>
                 </div>
             </div>
+
+            <button type="button" class="studio-assistant-fab" data-studio-assistant-toggle aria-expanded="false" aria-controls="studio-assistant-panel">
+                <span class="studio-assistant-fab-icon" aria-hidden="true">✦</span><span>دستیار استودیو</span>
+            </button>
+            <aside class="studio-assistant-panel" id="studio-assistant-panel" data-studio-assistant-panel hidden>
+                <div class="studio-assistant-heading"><div><span class="studio-assistant-eyebrow">QUICK GUIDE</span><strong>در سه قدم منتشر کنید</strong></div><button type="button" class="studio-assistant-close" data-studio-assistant-close aria-label="بستن">×</button></div>
+                <ol class="studio-assistant-steps"><li><span>۱</span><a href="#studio-design" data-studio-assistant-link>یک preset و رنگ انتخاب کنید</a></li><li><span>۲</span><a href="#studio-hero" data-studio-assistant-link>تصویر و متن معرفی را کامل کنید</a></li><li><span>۳</span><a href="#studio-save" data-studio-assistant-link>انتشار را روشن و ذخیره کنید</a></li></ol>
+                <div class="studio-assistant-note"><span aria-hidden="true">⌁</span><p>تصاویر و هویت برندتان با تغییر preset پاک نمی‌شود.</p></div>
+                <button type="button" class="studio-assistant-action" data-studio-assistant-close>متوجه شدم</button>
+            </aside>
 
             <div class="studio-status-grid">
                 <div class="studio-status-card <?php echo $woocommerce ? 'is-ready' : 'is-muted'; ?>">
@@ -270,7 +296,11 @@ final class Admin {
             wp_send_json_error(array('message' => 'چیدمان انتخاب‌شده معتبر نیست.'), 400);
         }
         $new = Settings::apply_preset($key, $this->settings->get());
-        update_option(Settings::OPTION, Settings::sanitize($new));
+        $saved = update_option(Settings::OPTION, Settings::sanitize($new));
+        Settings::clear_cache();
+        if (! $saved && Settings::get()['preset'] !== $key) {
+            wp_send_json_error(array('message' => 'ذخیره چیدمان انجام نشد؛ دوباره تلاش کنید.'), 500);
+        }
         wp_send_json_success(array('message' => 'چیدمان آماده اعمال شد. در حال تازه‌سازی تنظیمات…'));
     }
 
@@ -280,6 +310,7 @@ final class Admin {
         }
         check_admin_referer('arena_site_studio_reset');
         update_option(Settings::OPTION, Settings::defaults());
+        Settings::clear_cache();
         wp_safe_redirect(add_query_arg('settings-updated', '1', admin_url('admin.php?page=arena-site-studio')));
         exit;
     }
@@ -333,5 +364,10 @@ final class Admin {
         }
         $html .= '</div><button type="button" class="button button-secondary" data-studio-media data-target="' . esc_attr($target) . '">انتخاب تصویر</button></div><input type="hidden" id="' . esc_attr($target) . '" name="' . esc_attr($this->name($path)) . '" value="' . esc_attr($value) . '"><div class="studio-media-preview" data-preview-for="' . esc_attr($target) . '">' . ($image ? '<img src="' . esc_url($image) . '" alt=""><button type="button" class="studio-media-remove" data-remove-media="' . esc_attr($target) . '" aria-label="حذف تصویر">×</button>' : '<span>هنوز تصویری انتخاب نشده است</span>') . '</div></div>';
         return $html;
+    }
+
+    private function menu_icon() {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path fill="#ffffff" d="M10 1.2 12.2 7l5.8 2.2-5.8 2.2L10 17.2l-2.2-5.8L2 9.2 7.8 7 10 1.2Zm0 3.8-.9 2.4-.3.3-2.4.9 2.4.9.3.3.9 2.4.9-2.4.3-.3 2.4-.9-2.4-.9-.3-.3L10 5Zm6 8.2.8 2 .2.2 2 .8-2 .8-.2.2-.8 2-.8-2-.2-.2-2-.8 2-.8.2-.2.8-2Z"/></svg>';
+        return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }
 }

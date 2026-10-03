@@ -68,8 +68,11 @@ final class Plugin {
      */
     public static function activate() {
         if (false === get_option(Settings::OPTION, false)) {
-            add_option(Settings::OPTION, Settings::defaults());
+            // The front end reads this option on every request; keep it out of
+            // the autoloaded options blob on larger sites.
+            add_option(Settings::OPTION, Settings::defaults(), '', 'no');
         }
+        Settings::clear_cache();
         flush_rewrite_rules();
     }
 
